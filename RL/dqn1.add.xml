@@ -1,0 +1,5 @@
+<additional>
+    <vType id="agent" length="5.0" accel="2.0" decel="5.0" maxSpeed="15.0" color="1,1,0" sigma="0.5" guiShape="passenger/van" >
+        <param key="has.vehroute.device" value="true"/>
+    </vType>
+</additional>

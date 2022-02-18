@@ -1,0 +1,16 @@
+<configuration>
+    <input>
+        <net-file value="dqn.net.xml"/>
+        <route-files value="dqnrandom.rou.xml, agent.rou.xml"/>
+        <additional-files value="dqn.det.xml"/>
+        <gui-settings-file value="rl1.settings.xml"/>
+    </input>
+    <output>
+        <tripinfo-output value="dqn.tripinfo.xml"/>
+        <vehroute-output value="dqn.vehroute.xml"/>
+    </output>
+    <time>
+        <begin value="0"/>
+        <end value="3600"/>
+    </time>
+</configuration>
