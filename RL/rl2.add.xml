@@ -1,5 +1,0 @@
-<additional>
-               <vType id="reroutingType" type="passenger" length="4.5" accel="3.5" decel="2.2" maxSpeed="8.0" color="1,1,0" sigma="0.5" guiShape="passenger/hatchback">
-                              <param key="has.rerouting.device" value="true"/>
-               </vType>
-</additional>
