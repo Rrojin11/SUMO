@@ -1,0 +1,11 @@
+<configuration>
+    <input>
+        <net-file value="ql1.net.xml"/>
+        <additional-files value="ql2.det.xml"/>
+        <gui-settings-file value="ql1.settings.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="10000"/>
+    </time>
+</configuration>
