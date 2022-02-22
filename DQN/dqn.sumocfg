@@ -1,0 +1,13 @@
+<configuration>
+    <input>
+        <net-file value="./Net/dqnm.net.xml"/>
+        <route-files value="./Rou/dqnrandom.rou.xml, ./Rou/agent.rou.xml"/>
+        <additional-files value="./Add/dqn.det.xml"/>
+        <gui-settings-file value="rl1.settings.xml"/>
+    </input>
+    
+    <time>
+        <begin value="0"/>
+        <end value="10000"/>
+    </time>
+</configuration>
