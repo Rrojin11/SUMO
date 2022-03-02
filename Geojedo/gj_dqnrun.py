@@ -5,12 +5,13 @@ import os
 import sys
 import time
 import optparse
+import pickle
 import random
 import pylab
 import numpy as np
 import matplotlib.pyplot as plt
 from xml.etree.ElementTree import parse
-
+from queue import Queue
 from collections import defaultdict
 
 
@@ -65,14 +66,29 @@ def get_edgesinfo(net):
     edgesinfo = [x.find("lane").attrib for x in alledgelists]
     return edgesinfo
 
-def calculate_connections(edgeindex, net):
+def calculate_fromto(edgelists, net):
+    # calculate dictionary of reachable edges(next edge) for every edge  
+    tree = parse(net)
+    root = tree.getroot()
+    
+    dict_fromto = defaultdict(list)
+    #edgelists = [x[1] for x in edgeindex]
+    dict_fromto.update((k,[]) for k in edgelists)
+
+    for connection in root.iter("connection"):
+        curedge = connection.get("from")
+        if ':' not in curedge:
+            dict_fromto[curedge].append(connection.get("to"))
+    return dict_fromto
+
+def calculate_connections(edgelists, net,action_size):
     # calculate dictionary of reachable edges(next edge) for every edge  
     tree = parse(net)
     root = tree.getroot()
     
     dict_connection = defaultdict(list)
     #edgelists = [x[1] for x in edgeindex]
-    dict_connection.update((k,[]) for k in edgeindex)
+    dict_connection.update((k,[]) for k in edgelists)
 
     for connection in root.iter("connection"):
         curedge = connection.get("from")
@@ -80,16 +96,50 @@ def calculate_connections(edgeindex, net):
             dict_connection[curedge].append(connection.get("to"))
 
     for k,v in dict_connection.items():
+    
         if len(v)==0:
-            dict_connection[k]=['','','']
+            dict_connection[k]=['','','','','']
         elif len(v)==1:
-            dict_connection[k].append('')
-            dict_connection[k].append('')
+            dict_connection[k].extend(['']*4)
         elif len(v)==2:
-            dict_connection[k].append('')
+            dict_connection[k].extend(['']*3)
+        elif len(v)==3:
+            dict_connection[k].extend(['']*2)
+        elif len(v)==4:
+            dict_connection[k].extend(['']*1)
     return dict_connection 
 
+#hop count 계산 -> BFS알고리즘사용
+def bfs(adj, start_node):
+    x= len(adj)
+    adj = np.asarray(adj)
+    hops, visited =[0]*x,[0]*x
+    q = Queue()
+    
+    for s in np.where(adj[start_node]==1)[0]:
+        q.put(s)
+        hops[s]=1
+        visited[s]=1
 
+    while q.qsize() > 0 :
+        node = q.get()
+        for nextN in np.where(adj[node]==1)[0]:
+            if nextN != start_node and visited[nextN]==0:
+                visited[nextN]=1
+                q.put(nextN)
+                hops[nextN]=hops[node]+1 
+            
+    return hops
+
+def make_hopadj(adj): #hop count matrix 생성
+    gj_hopadj=[]
+    
+    for i in range(len(adj)):
+        gj_hopadj.append(bfs(adj, i))
+
+    with open('./Geojedo/gj_hopadj.pkl', 'wb') as f:
+        pickle.dump(gj_hopadj, f)
+    
 def generate_lanedetectionfile(net, det):
     #generate det.xml file by setting a detector at the end of each lane (-10m)
     alledges = get_alledges(net)
@@ -126,9 +176,8 @@ def plot_trainedresult(num_seed, episodes, scores, dirResult, num_episode):
 
 ##########@경로 탐색@##########
 #DQN routing : routing by applying DQN algorithm (using qlEnv & alAgent)
-def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, randomrou, add,dirResult,dirModel, sumocfg,fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size):  
-    env = gj_dqnEnv(sumoBinary, net_file = net, cfg_file = sumocfg, edgelists = edgelists, alldets=alldets, dict_connection=dict_connection, veh = veh, destination = destination, state_size = state_size, action_size= action_size)
-    env.reset()
+def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, randomrou, add,dirResult,dirModel, sumocfg,fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size,edgedict,hopadj):  
+    env = gj_dqnEnv(sumoBinary, net_file = net, cfg_file = sumocfg, edgelists = edgelists, alldets=alldets, dict_connection=dict_connection, veh = veh, destination = destination, state_size = state_size, action_size= action_size,edgedict = edgedict, hopadj = hopadj)
   
     if trained :
         agent = dqnTrainedAgent( num_seed, edgelists, dict_connection, state_size, action_size,num_episode, dirModel)
@@ -170,21 +219,18 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
                 if curedge ==destination:
                     break
              
-                curedge = env.get_RoadID(veh) #0221수정: 위 2개 명령어 대신 get_RoadID로 통일시킴
+                curedge = env.get_RoadID(veh) # [err] Still veh0 is not known error 
                 state = env.get_state(veh, curedge) 
                 state = np.reshape(state,[1,state_size]) #for be 모델 input
 
                 if trained:
                     qvalue, action = agent.get_trainedaction(state)
-                    #print('err1 dqnTrainedAgent Qvalue: {} / Action: {}'.format(qvalue,action))
                 else:
                     action = agent.get_action(state) #현재 edge에서 가능한 (0,1,2) 중 선택 
 
                 nextedge = env.get_nextedge(curedge, action) #next edge 계산해서 env에 보냄.
-                #print('err2')
                 if nextedge!="" : break
 
-                    
             print('%s -> ' %nextedge, end=' ')
             routes.append(nextedge)
             
@@ -254,9 +300,9 @@ if __name__ == "__main__":
 
     veh = "veh0"
     
-    destination = 'E9'
-    successend = ["E9"]
-    state_size = 64
+    destination = '-239842081#2'
+    successend = ["-239842081#2"]
+    state_size = 16
     action_size = 5
 
 
@@ -274,35 +320,46 @@ if __name__ == "__main__":
     else: num_episode = 300
   
     edgelists = get_alledges(net) # 395edges for "./Geojedo/Net/geojedo.net.xml" 
-    edgeindex=[]
-    for i,v in enumerate (edgelists):
-        edgeindex.append((i,v))
-    dict_connection = calculate_connections(edgeindex, net)
-    len_edge = len(edgelists)
-    adj = [[0]*len_edge for _ in range(len_edge)]
     
-
-
-    #for i,v in dict_connection.items():
-        
-   
+    dict_connection = calculate_connections(edgelists, net, action_size) # dict_fromto + fill empty route as ''
+    dict_fromto = calculate_fromto(edgelists, net) #only connenciton information from -> to edges
+    len_edge = len(edgelists)
+    keys=sorted(dict_fromto.keys())
+    edgedict = defaultdict(int)
+    edgedict.update((i,v) for i,v in enumerate(keys))
+    
+    '''             #already made and save as gj_adj.pkl
+    adj = [[0]*len_edge for _ in range(len_edge)]
+    for a,b in [(keys.index(a), keys.index(b)) for a, row in dict_fromto.items() for b in row]:
+        adj[a][b] = 1
+    with open('./Geojedo/gj_adj.pkl','wb') as f:
+        pickle.dump(adj, f)
+    
+    make_hopadj(adj) #already made and save as gj_hopadj.pkl
+    '''
+    with open('./Geojedo/gj_adj.pkl', 'rb') as f:
+       adj = pickle.load(f) # list of (395, 395)
+    with open('./Geojedo/gj_hopadj.pkl', 'rb') as f:
+       hopadj = pickle.load(f)
+    hopadj = np.asarray(hopadj)
+    
     dets = generate_lanedetectionfile(net,det) #이미 생성해둠!
     alldets = get_alldets(edgelists)
     
 
     """1) Run Simulation"""
-    '''
+    
     trained = False
     num_seed = random.randrange(1000)
     while True: #num_episode같아도 num_seed를 달리해서 겹치는 파일 생성 방지함. 
         file = dirModel + str(num_episode)+'_'+str(num_seed)+'.h5'
         if not os.path.isfile(file): break
     dqn_run(num_seed, trained, sumoBinary, plotResult, num_episode, net, trip, randomrou, add, dirResult,dirModel,
-    sumocfg, fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size)
+    sumocfg, fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size, edgedict, hopadj)
     
     
     """2) Run with pre-trained model : Load Weights & Route """
-    
+    '''
     trained = True
     num_seed = 975
     dqn_run(num_seed, trained, sumoBinary, plotResult, num_episode, net, trip, randomrou, add, dirResult,dirModel,

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<!-- generated on 2022-03-02 19:34:52 by Eclipse SUMO GUI Version 1.12.0
+<configuration xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/sumoConfiguration.xsd">
+
+    <input>
+        <net-file value="./Geojedo/./Net/geojedo.net.xml"/>
+        <route-files value="./Geojedo/./Rou/gj_dqnrandom.rou.xml,./Geojedo/./Rou/gj_agent.rou.xml"/>
+        <additional-files value="./Geojedo/./Add/gj_dqn.det.xml"/>
+    </input>
+
+    <time>
+        <begin value="0"/>
+        <end value="10000"/>
+    </time>
+
+    <processing>
+        <max-depart-delay value="10000"/>
+    </processing>
+
+    <traci_server>
+        <remote-port value="52309"/>
+    </traci_server>
+
+    <gui_only>
+        <gui-settings-file value="./Geojedo/realworld.settings.xml"/>
+    </gui_only>
+
+</configuration>
+-->
+
+<detector xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/det_e2_file.xsd">
+</detector>
