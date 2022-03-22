@@ -8,7 +8,7 @@ from xml.etree.ElementTree import parse
 from collections import defaultdict
 
 class gj_dqnEnv():
-    def __init__(self, sumoBinary, net_file: str, cfg_file: str, edgelists: list,alldets: list, dict_connection, veh:str, destination:str, state_size: int, action_size: int,edgedict: dict, hopadj : list, use_gui: bool = True,
+    def __init__(self, sumoBinary, net_file: str, cfg_file: str, edgelists: list,alldets: list, dict_connection, veh:str, destination:list, state_size: int, action_size: int,edgedict: dict, hopadj : list, use_gui: bool = True,
             begin_time: int =0, num_seconds:int = 3600, max_depart_delay:int = 10000):
         
         self.sumoBinary = sumoBinary
@@ -42,7 +42,8 @@ class gj_dqnEnv():
     def start_simulation(self):
         sumo_cmd = [self.sumoBinary,
             '-c', self.sumocfg,
-            '--max-depart-delay', str(self.max_depart_delay)]
+            '--max-depart-delay', str(self.max_depart_delay),
+            '--collision.action', 'none']
         
         self.sumo.start(sumo_cmd)
         #테스트중 traffic randomroute
@@ -50,8 +51,8 @@ class gj_dqnEnv():
         self.dict_edgelengths, self.list_edgelengths = self.get_edgelengths()
     
         self.dict_edgelimits = self.get_edgelimits()
-        destlane = self.destination+'_0'
-        self.destCord = self.sumo.lane.getShape(destlane)[0]
+        destlane = [i+'_0' for i in self.destination]
+        self.destCord = self.sumo.lane.getShape(destlane[0])[0]
         #print('self.destCord: ',self.destCord)
         
      
@@ -73,7 +74,8 @@ class gj_dqnEnv():
             self.sumo.simulationStep()
 
         curedge = self.get_curedge(curlane)
-        state = self.get_state(self.veh,curedge)
+        
+        state = self.get_state(self.veh,curedge, curlane)
             
         return state
         
@@ -88,17 +90,18 @@ class gj_dqnEnv():
 
     def get_done(self,curedge):
         done = False
-        if curedge ==self.destination:
+        if curedge in self.destination:
             done = True
         return done
     
     def get_RoadID(self, veh):
         return traci.vehicle.getRoadID(veh)
 
-    def get_reward(self, curedge, nextedge):
+    def get_reward(self, curedge, curlane, nextedge):
         reward = 0
         #reward = traveling time of curedge
-        det = curedge.replace('E','D')
+        det = 'D'+curlane
+        
         num_veh = self.get_numVeh(det)
         if num_veh ==1: # 자기자신  #length/speedlimit 
             traveltime = self.dict_edgelengths[curedge] / self.dict_edgelimits[curedge]
@@ -135,11 +138,11 @@ class gj_dqnEnv():
         dict_edgelimits['-E7'] = 10.0
         return dict_edgelimits
 
-    def get_state(self, veh, curedge): #state = [hop0's(vehicle number, avg speed, length), hop1's, hop2's, hop3's, origin x, y, destination x,y] = (16,1)
+    def get_state(self, veh, curedge, curlane): #state = [hop0's(vehicle number, avg speed, length), hop1's, hop2's, hop3's, origin x, y, destination x,y] = (16,1)
         state = []
         curidx = self.edgedict[curedge]
-        
-        det = curedge.replace("E","D")
+        det = 'D'+curlane
+       
         state.append(self.get_numVeh(det)) #vehicle number
         state.append(self.sumo.edge.getLastStepMeanSpeed(curedge)) #avg speed
         state.append(self.sumo.lane.getLength(curedge+'_0')) # length
@@ -150,7 +153,8 @@ class gj_dqnEnv():
             for i in np.where(self.hopadj[curidx]==hop)[0]: 
                 cnt+=1
                 edge = self.edgedict[i]
-                det = edge.replace("E","D")
+                det = 'D'+curlane
+                
                 avgVeh+=self.get_numVeh(det) #vehicle number
                 avgLength += self.sumo.lane.getLength(curedge+'_0') # length
                 avgSpeed += self.sumo.edge.getLastStepMeanSpeed(edge) #avg speed
@@ -169,7 +173,7 @@ class gj_dqnEnv():
         next_state = []
         curidx = self.edgedict[nextedge]
         
-        det = nextedge.replace("E","D")
+        det = 'D'+nextedge+'_0'
         next_state.append(self.get_numVeh(det)) #vehicle number
         next_state.append(self.sumo.edge.getLastStepMeanSpeed(nextedge)) #avg speed
         next_state.append(self.sumo.lane.getLength(nextedge+'_0')) # length
@@ -180,7 +184,7 @@ class gj_dqnEnv():
             for i in np.where(self.hopadj[curidx]==hop)[0]: 
                 cnt+=1
                 edge = self.edgedict[i]
-                det = edge.replace("E","D")
+                det = 'D'+nextedge+'_0'
                 avgVeh+=self.get_numVeh(det) #vehicle number
                 avgLength += self.sumo.lane.getLength(nextedge+'_0') # length
                 avgSpeed += self.sumo.edge.getLastStepMeanSpeed(edge) #avg speed
@@ -195,28 +199,29 @@ class gj_dqnEnv():
         next_state.extend(list(self.destCord))
         return next_state
 
-    def step(self, curedge, nextedge):
+    def step(self, curedge,curlane, nextedge):
         
         beforeedge = curedge #비교해서 변하면 고를려고!
-
+        beforelane = curlane
         done = self.get_done(curedge)
-        reward = self.get_reward(curedge, nextedge)
+        reward = self.get_reward(curedge,curlane, nextedge)
 
         if done:
             return reward, done
         
-        if nextedge=='':
-            print('#err gj_dqn lines 209')
-        self.sumo.vehicle.changeTarget(self.veh,nextedge) #차량 움직여!
-        
+        self.sumo.vehicle.changeTarget(self.veh,nextedge) #Set next route
+        #print('err route: ',self.sumo.vehicle.getRoute(self.veh))
         while self.sumo.simulation.getMinExpectedNumber() > 0:
+            self.sumo.simulationStep()
             curedge = self.get_RoadID(self.veh)
+            curlane = self.get_curlane(self.veh)
             done = self.get_done(curedge)
             if done:
                 break  
-            self.sumo.simulationStep() 
-            if curedge in self.edgelists and curedge !=beforeedge : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
+            if curlane !=beforelane : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
                 break
+            #if curedge in self.edgelists and curedge !=beforeedge : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
+            #    break
 
         return reward, done    
 

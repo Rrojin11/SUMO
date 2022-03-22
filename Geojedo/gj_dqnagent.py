@@ -20,7 +20,7 @@ class dqnAgent():
         self.discount_factor=0.99
         self.learning_rate = 0.001
         self.epsilon=1.0
-        self.epsilon_decay=0.95
+        self.epsilon_decay=0.99
         self.epsilon_min = 0.05
         self.batch_size = 32    #조절
         self.train_start = 500 #조절

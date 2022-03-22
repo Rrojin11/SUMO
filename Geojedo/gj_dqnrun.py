@@ -59,12 +59,14 @@ def get_alledges(net):
     edgelists = [edge.get("id") for edge in alledgelists if ':' not in edge.get("id")]
     return edgelists
 
-def get_edgesinfo(net):
+def get_lanesinfo(net):  
+    lanesinfo = []
     tree = parse(net)
     root = tree.getroot()
-    alledgelists = root.findall("edge")
-    edgesinfo = [x.find("lane").attrib for x in alledgelists]
-    return edgesinfo
+    for lane in root.iter("lane"):
+        lanesinfo.append(lane.attrib)
+
+    return lanesinfo
 
 def calculate_fromto(edgelists, net):
     # calculate dictionary of reachable edges(next edge) for every edge  
@@ -140,24 +142,19 @@ def make_hopadj(adj): #hop count matrix 생성
     with open('./Geojedo/gj_hopadj.pkl', 'wb') as f:
         pickle.dump(gj_hopadj, f)
     
-def generate_lanedetectionfile(net, det):
-    #generate det.xml file by setting a detector at the end of each lane (-10m)
-    alledges = get_alledges(net)
-    edgesinfo = get_edgesinfo(net)
-    alllanes = [edge +'_0' for edge in alledges]
-    alldets =  [edge.replace("E","D") for edge in alledges]  
-  
+def generate_lanedetectionfile(net, det):   #generate det.xml file 
+    lanesinfo = get_lanesinfo(net)
     with open(det,"w") as f:
         print('<additional>', file = f)
-        for i,v in enumerate(edgesinfo):
-            
+        for v in lanesinfo:
             print('        <laneAreaDetector id="%s" lane="%s" pos="0.0" length="%s" freq ="%s" file="dqn_detfile.out"/>'
-            %(alldets[i], v['id'],v['length'],"1"), file = f)
+            %('D'+v['id'], v['id'],v['length'],"1"), file = f)
         print('</additional>', file = f)
-    return alldets
+    
 
-def get_alldets(alledges):
-    alldets =  [edge.replace("E","D") for edge in alledges]
+def get_alldets(net):
+    lanesinfo = get_lanesinfo(net)
+    alldets =  ['D'+lane['id'] for lane in lanesinfo]  
     return alldets
 
 def plot_result(num_seed, episodes, scores, dirResult, num_episode):
@@ -194,7 +191,7 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
         print("\n********#{} episode start***********".format(episode))
 
         #Random traffic 생성
-        cmd_genDemand = "python \"C:/Program Files (x86)/Eclipse/Sumo/tools/randomTrips.py\" -n {} -o {} -r {} -b 0 -e 3600 -p 3 --additional-file {} --trip-attributes \"type='type1'\" --random\"".format(net, trip, randomrou, add)
+        cmd_genDemand = "python \"C:/Program Files (x86)/Eclipse/Sumo/tools/randomTrips.py\" -n {} -o {} -r {} -b 0 -e 3600 -p 2 --additional-file {} --trip-attributes \"type='type1'\" --random\"".format(net, trip, randomrou, add)
         os.system(cmd_genDemand)   
    
         
@@ -205,8 +202,8 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
         state = env.reset() # state : 
         state = np.reshape(state,[1,state_size]) #for be 모델 input
         
-        curedge = env.get_RoadID(veh) #0221수정: 위 2개 명령어 대신 get_RoadID로 통일시킴
-        
+        curedge = env.get_RoadID(veh) 
+        curlane = env.get_curlane(veh)
         routes.append(curedge)
         print('%s -> ' %curedge, end=' ')
         done = False
@@ -214,19 +211,17 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
         cnt=0
         while not done:     
             block = True
-            #cnt = 0
-            while block: #막힌 도로를 골랐을때(막힌 도로 = '' 로 저장해둠)
-                if curedge ==destination:
-                    break
-             
-                curedge = env.get_RoadID(veh) # [err] Still veh0 is not known error 
-                state = env.get_state(veh, curedge) 
-                state = np.reshape(state,[1,state_size]) #for be 모델 input
+            curedge = env.get_RoadID(veh) # [err0310] veh0 is not known error 
+            state = env.get_state(veh, curedge, curlane) 
+            state = np.reshape(state,[1,state_size]) #for be model's input
 
+            while block: #막힌 도로를 골랐을때(막힌 도로 = '' 로 저장해둠) do while 문 
+                if curedge in destination:
+                    break
                 if trained:
                     qvalue, action = agent.get_trainedaction(state)
                 else:
-                    action = agent.get_action(state) #현재 edge에서 가능한 (0,1,2) 중 선택 
+                    action = agent.get_action(state) #현재 edge에서 가능한 action 선택 
 
                 nextedge = env.get_nextedge(curedge, action) #next edge 계산해서 env에 보냄.
                 if nextedge!="" : break
@@ -236,7 +231,7 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
             
             next_state = env.get_nextstate(veh, nextedge)  
             next_state = np.reshape(state,[1,state_size]) #for be 모델 input
-            reward, done = env.step(curedge, nextedge) #changeTarget to nextedge
+            reward, done = env.step(curedge, curlane, nextedge) #changeTarget to 'nextedge'
             score += reward
 
             if not trained: agent.append_sample(state, action, reward, next_state, done)
@@ -244,7 +239,7 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
             if not trained and len(agent.memory)>= agent.train_start:
                 agent.train_model()
             
-            if score<-1000: #이 기능 테스트 필요 0219 6pm
+            if score<-100000: #이 기능 테스트 필요 0219 6pm
                 done = True
 
             if not trained and done: 
@@ -300,8 +295,8 @@ if __name__ == "__main__":
 
     veh = "veh0"
     
-    destination = '-239842081#2'
-    successend = ["-239842081#2"]
+    destination = ["-240392105#0","-243399011#1"]
+    successend = ["-240392105#0","-243399011#1"]
     state_size = 16
     action_size = 5
 
@@ -343,12 +338,11 @@ if __name__ == "__main__":
        hopadj = pickle.load(f)
     hopadj = np.asarray(hopadj)
     
-    dets = generate_lanedetectionfile(net,det) #이미 생성해둠!
-    alldets = get_alldets(edgelists)
-    
-
+    dets = generate_lanedetectionfile(net,det) #already made
+    alldets = get_alldets(net)
+    #print(dict_connection["478427205#2"])
+    #print(dict_connection["E0"])
     """1) Run Simulation"""
-    
     trained = False
     num_seed = random.randrange(1000)
     while True: #num_episode같아도 num_seed를 달리해서 겹치는 파일 생성 방지함. 
