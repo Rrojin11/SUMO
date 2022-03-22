@@ -211,19 +211,23 @@ class gj_dqnEnv():
         
         self.sumo.vehicle.changeTarget(self.veh,nextedge) #Set next route
         #print('err route: ',self.sumo.vehicle.getRoute(self.veh))
-        while self.sumo.simulation.getMinExpectedNumber() > 0:
+        
+        while self.sumo.simulation.getMinExpectedNumber() > 0:#Run a simulation until all vehicles have arrived
             self.sumo.simulationStep()
             curedge = self.get_RoadID(self.veh)
             curlane = self.get_curlane(self.veh)
             done = self.get_done(curedge)
-            if done:
-                break  
             if curlane !=beforelane : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
                 break
-            #if curedge in self.edgelists and curedge !=beforeedge : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
-            #    break
-
-        return reward, done    
+            if done:
+                break  
+            try: #0322 10pm 수정s
+                pos = self.sumo.vehicle.getPosition(self.veh)
+            except self.sumo.TraCIException: #if unknown veh0 -> 그럼 다시 
+                self.sumo.route.add("trip", [curedge, curedge]) #route 이름이 겹치면안된다고하니 수정필요!!!
+                self.sumo.vehicle.add(self.veh,"agent", "trip", typeID="reroutingType")
+                pass # or do something smarter
+        return reward, done,beforelane, curlane    
 
     
     

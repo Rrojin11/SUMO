@@ -211,7 +211,7 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
         cnt=0
         while not done:     
             block = True
-            curedge = env.get_RoadID(veh) # [err0310] veh0 is not known error 
+            #curedge = env.get_RoadID(veh) # [err0310] veh0 is not known error -->curedge=nextedge코드가 있으니 필요없는거아님> 0322/10시20분
             state = env.get_state(veh, curedge, curlane) 
             state = np.reshape(state,[1,state_size]) #for be model's input
 
@@ -231,7 +231,8 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
             
             next_state = env.get_nextstate(veh, nextedge)  
             next_state = np.reshape(state,[1,state_size]) #for be 모델 input
-            reward, done = env.step(curedge, curlane, nextedge) #changeTarget to 'nextedge'
+            reward, done,before,cur = env.step(curedge, curlane, nextedge) #changeTarget to 'nextedge'
+            print('return from step)before: %s -> cur: %s',before, cur)
             score += reward
 
             if not trained: agent.append_sample(state, action, reward, next_state, done)
