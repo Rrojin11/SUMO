@@ -3,12 +3,14 @@ import time
 import numpy as np
 
 import traci
+import random
+import string
 
 from xml.etree.ElementTree import parse
 from collections import defaultdict
 
 class gj_dqnEnv():
-    def __init__(self, sumoBinary, net_file: str, cfg_file: str, edgelists: list,alldets: list, dict_connection, veh:str, destination:list, state_size: int, action_size: int,edgedict: dict, hopadj : list, use_gui: bool = True,
+    def __init__(self, sumoBinary, net_file: str, cfg_file: str, edgelists: list,alldets: list, dict_connection, veh:str, destination:list, state_size: int, action_size: int,lanedict: dict, hopadj : list, use_gui: bool = True,
             begin_time: int =0, num_seconds:int = 3600, max_depart_delay:int = 10000):
         
         self.sumoBinary = sumoBinary
@@ -34,7 +36,7 @@ class gj_dqnEnv():
         self.state_size = state_size
         
         self.dict_connection = dict_connection
-        self.edgedict = edgedict
+        self.lanedict = lanedict
         self.hopadj = hopadj
 
         self.sumo =traci
@@ -140,7 +142,7 @@ class gj_dqnEnv():
 
     def get_state(self, veh, curedge, curlane): #state = [hop0's(vehicle number, avg speed, length), hop1's, hop2's, hop3's, origin x, y, destination x,y] = (16,1)
         state = []
-        curidx = self.edgedict[curedge]
+        curidx = self.lanedict[curedge]
         det = 'D'+curlane
        
         state.append(self.get_numVeh(det)) #vehicle number
@@ -152,7 +154,7 @@ class gj_dqnEnv():
             cnt = 0
             for i in np.where(self.hopadj[curidx]==hop)[0]: 
                 cnt+=1
-                edge = self.edgedict[i]
+                edge = self.lanedict[i]
                 det = 'D'+curlane
                 
                 avgVeh+=self.get_numVeh(det) #vehicle number
@@ -171,7 +173,7 @@ class gj_dqnEnv():
 
     def get_nextstate(self, veh, nextedge):
         next_state = []
-        curidx = self.edgedict[nextedge]
+        curidx = self.lanedict[nextedge]
         
         det = 'D'+nextedge+'_0'
         next_state.append(self.get_numVeh(det)) #vehicle number
@@ -183,7 +185,7 @@ class gj_dqnEnv():
             cnt = 0
             for i in np.where(self.hopadj[curidx]==hop)[0]: 
                 cnt+=1
-                edge = self.edgedict[i]
+                edge = self.lanedict[i]
                 det = 'D'+nextedge+'_0'
                 avgVeh+=self.get_numVeh(det) #vehicle number
                 avgLength += self.sumo.lane.getLength(nextedge+'_0') # length
@@ -201,8 +203,7 @@ class gj_dqnEnv():
 
     def step(self, curedge,curlane, nextedge):
         
-        beforeedge = curedge #비교해서 변하면 고를려고!
-        beforelane = curlane
+        beforeedge = curedge # 현재 edge 저장해두었다가 이동하면서 바뀌면 return 
         done = self.get_done(curedge)
         reward = self.get_reward(curedge,curlane, nextedge)
 
@@ -214,20 +215,25 @@ class gj_dqnEnv():
         
         while self.sumo.simulation.getMinExpectedNumber() > 0:#Run a simulation until all vehicles have arrived
             self.sumo.simulationStep()
-            curedge = self.get_RoadID(self.veh)
+            try: #0322 10pm 수정s
+                pos = self.sumo.vehicle.getPosition(self.veh)
+            except self.sumo.TraCIException: #if unknown veh0 -> then assign 'veh0' again 
+                while 1:
+                    routeid = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6)) #random id generator
+                    if routeid not in self.sumo.route.getIDList():
+                        break
+                self.sumo.route.add(routeid, [beforeedge, nextedge]) #route 이름이 겹치면안된다고하니 수정필요!!!
+                self.sumo.vehicle.add("veh0",routeid, typeID="agent")
+                #pass or do something smarter
+            curedge = self.get_RoadID(self.veh)# veh0 is not known error
             curlane = self.get_curlane(self.veh)
             done = self.get_done(curedge)
-            if curlane !=beforelane : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
+            if curedge !=beforeedge : #변했네!! 그럼 이제 다음 꺼 고르러 가야지
                 break
             if done:
                 break  
-            try: #0322 10pm 수정s
-                pos = self.sumo.vehicle.getPosition(self.veh)
-            except self.sumo.TraCIException: #if unknown veh0 -> 그럼 다시 
-                self.sumo.route.add("trip", [curedge, curedge]) #route 이름이 겹치면안된다고하니 수정필요!!!
-                self.sumo.vehicle.add(self.veh,"agent", "trip", typeID="reroutingType")
-                pass # or do something smarter
-        return reward, done,beforelane, curlane    
+           
+        return reward, done,beforeedge, curedge    
 
     
     

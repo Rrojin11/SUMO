@@ -8,6 +8,5 @@
     
     <time>
         <begin value="0"/>
-        <end value="10000"/>
     </time>
 </configuration>

@@ -68,35 +68,41 @@ def get_lanesinfo(net):
 
     return lanesinfo
 
-def calculate_fromto(edgelists, net):
-    # calculate dictionary of reachable edges(next edge) for every edge  
+def calculate_fromto(net):
+    
     tree = parse(net)
     root = tree.getroot()
     
     dict_fromto = defaultdict(list)
-    #edgelists = [x[1] for x in edgeindex]
-    dict_fromto.update((k,[]) for k in edgelists)
-
+   
     for connection in root.iter("connection"):
         curedge = connection.get("from")
+        fromlane = connection.get("from")+'_'+connection.get("fromLane")
+        tolane = connection.get("to")+'_'+connection.get("toLane")
+      
         if ':' not in curedge:
-            dict_fromto[curedge].append(connection.get("to"))
+            if fromlane in dict_fromto:
+                dict_fromto[fromlane].append(tolane)
+            else:
+                dict_fromto[fromlane] = [tolane]
     return dict_fromto
 
-def calculate_connections(edgelists, net,action_size):
-    # calculate dictionary of reachable edges(next edge) for every edge  
+def calculate_connections(net,action_size): # calculate dictionary of reachable edges(next edge) for every edge  
     tree = parse(net)
     root = tree.getroot()
     
     dict_connection = defaultdict(list)
-    #edgelists = [x[1] for x in edgeindex]
-    dict_connection.update((k,[]) for k in edgelists)
-
+  
     for connection in root.iter("connection"):
         curedge = connection.get("from")
+        fromlane = connection.get("from")+'_'+connection.get("fromLane")
+        tolane = connection.get("to")+'_'+connection.get("toLane")
+      
         if ':' not in curedge:
-            dict_connection[curedge].append(connection.get("to"))
-
+            if fromlane in dict_connection:
+                dict_connection[fromlane].append(tolane)
+            else:
+                dict_connection[fromlane] = [tolane]
     for k,v in dict_connection.items():
     
         if len(v)==0:
@@ -173,8 +179,8 @@ def plot_trainedresult(num_seed, episodes, scores, dirResult, num_episode):
 
 ##########@경로 탐색@##########
 #DQN routing : routing by applying DQN algorithm (using qlEnv & alAgent)
-def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, randomrou, add,dirResult,dirModel, sumocfg,fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size,edgedict,hopadj):  
-    env = gj_dqnEnv(sumoBinary, net_file = net, cfg_file = sumocfg, edgelists = edgelists, alldets=alldets, dict_connection=dict_connection, veh = veh, destination = destination, state_size = state_size, action_size= action_size,edgedict = edgedict, hopadj = hopadj)
+def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, randomrou, add,dirResult,dirModel, sumocfg,fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size,lanedict,hopadj):  
+    env = gj_dqnEnv(sumoBinary, net_file = net, cfg_file = sumocfg, edgelists = edgelists, alldets=alldets, dict_connection=dict_connection, veh = veh, destination = destination, state_size = state_size, action_size= action_size,lanedict = lanedict, hopadj = hopadj)
   
     if trained :
         agent = dqnTrainedAgent( num_seed, edgelists, dict_connection, state_size, action_size,num_episode, dirModel)
@@ -231,8 +237,8 @@ def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, rand
             
             next_state = env.get_nextstate(veh, nextedge)  
             next_state = np.reshape(state,[1,state_size]) #for be 모델 input
-            reward, done,before,cur = env.step(curedge, curlane, nextedge) #changeTarget to 'nextedge'
-            print('return from step)before: %s -> cur: %s',before, cur)
+            reward, done,before,cur = env.step(curedge, curlane, nextedge) 
+            #print('before: %s -> cur: %s'%(before, cur))
             score += reward
 
             if not trained: agent.append_sample(state, action, reward, next_state, done)
@@ -317,32 +323,36 @@ if __name__ == "__main__":
   
     edgelists = get_alledges(net) # 395edges for "./Geojedo/Net/geojedo.net.xml" 
     
-    dict_connection = calculate_connections(edgelists, net, action_size) # dict_fromto + fill empty route as ''
-    dict_fromto = calculate_fromto(edgelists, net) #only connenciton information from -> to edges
-    len_edge = len(edgelists)
+    dict_connection = calculate_connections(net, action_size) # dict_fromto + fill empty route as ''   
+    dict_fromto = calculate_fromto(net) #only real connenciton information without fill empty as ''
+       
     keys=sorted(dict_fromto.keys())
-    edgedict = defaultdict(int)
-    edgedict.update((i,v) for i,v in enumerate(keys))
+    len_lanes = len(keys) #429
+    lanedict = defaultdict(int) #eg. 0 -239842076#0_0
+    lanedict.update((i,v) for i,v in enumerate(keys))
     
-    '''             #already made and save as gj_adj.pkl
-    adj = [[0]*len_edge for _ in range(len_edge)]
-    for a,b in [(keys.index(a), keys.index(b)) for a, row in dict_fromto.items() for b in row]:
-        adj[a][b] = 1
+    '''
+    adj = [[0]*len_lanes for _ in range(len_lanes)]
+    for a,b in [ (keys.index(a), keys.index(b)) for a, row in dict_fromto.items() for b in row ]:
+        adj[a][b] = 1 #already saved as gj_adj.pkl
+
     with open('./Geojedo/gj_adj.pkl','wb') as f:
         pickle.dump(adj, f)
     
-    make_hopadj(adj) #already made and save as gj_hopadj.pkl
+    make_hopadj(adj) #already saved as gj_hopadj.pkl
     '''
+
     with open('./Geojedo/gj_adj.pkl', 'rb') as f:
-       adj = pickle.load(f) # list of (395, 395)
+       adj = pickle.load(f) # 2d (395, 395)
+    
     with open('./Geojedo/gj_hopadj.pkl', 'rb') as f:
        hopadj = pickle.load(f)
     hopadj = np.asarray(hopadj)
-    
+
     dets = generate_lanedetectionfile(net,det) #already made
     alldets = get_alldets(net)
-    #print(dict_connection["478427205#2"])
-    #print(dict_connection["E0"])
+    #print(dict_connection["478427205#2_0"])
+    
     """1) Run Simulation"""
     trained = False
     num_seed = random.randrange(1000)
@@ -350,11 +360,11 @@ if __name__ == "__main__":
         file = dirModel + str(num_episode)+'_'+str(num_seed)+'.h5'
         if not os.path.isfile(file): break
     dqn_run(num_seed, trained, sumoBinary, plotResult, num_episode, net, trip, randomrou, add, dirResult,dirModel,
-    sumocfg, fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size, edgedict, hopadj)
+    sumocfg, fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size, lanedict, hopadj)
     
-    
-    """2) Run with pre-trained model : Load Weights & Route """
     '''
+    """2) Run with pre-trained model : Load Weights & Route """
+    
     trained = True
     num_seed = 975
     dqn_run(num_seed, trained, sumoBinary, plotResult, num_episode, net, trip, randomrou, add, dirResult,dirModel,
