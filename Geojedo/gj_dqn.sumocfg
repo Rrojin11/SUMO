@@ -1,7 +1,7 @@
 <configuration>
     <input>
         <net-file value="./Net/geojedo.net.xml"/>
-        <route-files value="./Rou/gj_dqnrandom.rou.xml, ./Rou/gj_agent.rou.xml"/>
+        <route-files value="./Rou/gj_agent.rou.xml"/>
         <additional-files value="./Add/gj_dqn.det.xml"/>
         <gui-settings-file value="realworld.settings.xml"/>
     </input>

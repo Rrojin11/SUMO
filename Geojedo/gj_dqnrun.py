@@ -106,15 +106,14 @@ def calculate_connections(net,action_size): # calculate dictionary of reachable 
     for k,v in dict_connection.items():
     
         if len(v)==0:
-            dict_connection[k]=['','','','','']
+            dict_connection[k]=['','','','']
         elif len(v)==1:
-            dict_connection[k].extend(['']*4)
+            dict_connection[k].extend(['']*3)
         elif len(v)==2:
             dict_connection[k].extend(['']*3)
         elif len(v)==3:
-            dict_connection[k].extend(['']*2)
-        elif len(v)==4:
             dict_connection[k].extend(['']*1)
+        
     return dict_connection 
 
 #hop count 계산 -> BFS알고리즘사용
@@ -175,138 +174,191 @@ def plot_trainedresult(num_seed, episodes, scores, dirResult, num_episode):
     pylab.ylabel('Mean Travel Time')
     pylab.savefig(dirResult+'TrainedModel'+str(num_episode)+'_'+str(num_seed)+'.png')  
 
-
+def get_adjdata():
+    with open('./Geojedo/gj_adj.pkl', 'rb') as f:
+       adj = pickle.load(f) # 2d (395, 395)
+    
+    with open('./Geojedo/gj_hopadj.pkl', 'rb') as f:
+       hopadj = pickle.load(f)
+    hopadj = np.asarray(hopadj)
+    return adj, hopadj
 
 ##########@경로 탐색@##########
 #DQN routing : routing by applying DQN algorithm (using qlEnv & alAgent)
 def dqn_run(num_seed, trained,sumoBinary,plotResult, num_episode,net, trip, randomrou, add,dirResult,dirModel, sumocfg,fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size,lanedict,hopadj):  
-    env = gj_dqnEnv(sumoBinary, net_file = net, cfg_file = sumocfg, edgelists = edgelists, alldets=alldets, dict_connection=dict_connection, veh = veh, destination = destination, state_size = state_size, action_size= action_size,lanedict = lanedict, hopadj = hopadj)
-  
+    
     if trained :
         agent = dqnTrainedAgent( num_seed, edgelists, dict_connection, state_size, action_size,num_episode, dirModel)
         print('**** [TrainedAgent {} Route Start] ****'.format(num_episode))
     else:
         agent = dqnAgent(num_seed, edgelists, dict_connection, state_size, action_size, num_episode, dirModel)
-    
+   
     start = time.time()
 
     scores, episodes = [],[]
     score_avg = 0
+    success_num = 0
     for episode in range(num_episode):
-        
+        num_sample = 0
         print("\n********#{} episode start***********".format(episode))
 
-        #Random traffic 생성
-        cmd_genDemand = "python \"C:/Program Files (x86)/Eclipse/Sumo/tools/randomTrips.py\" -n {} -o {} -r {} -b 0 -e 3600 -p 2 --additional-file {} --trip-attributes \"type='type1'\" --random\"".format(net, trip, randomrou, add)
-        os.system(cmd_genDemand)   
-   
+        episode_score = 0
         
-        score = 0
-        routes = []
-
-        #reset environment
-        state = env.reset() # state : 
-        state = np.reshape(state,[1,state_size]) #for be 모델 input
-        
-        curedge = env.get_RoadID(veh) 
-        curlane = env.get_curlane(veh)
-        routes.append(curedge)
-        print('%s -> ' %curedge, end=' ')
-        done = False
-
-        cnt=0
-        while not done:     
-            block = True
-            #curedge = env.get_RoadID(veh) # [err0310] veh0 is not known error -->curedge=nextedge코드가 있으니 필요없는거아님> 0322/10시20분
-            state = env.get_state(veh, curedge, curlane) 
-            state = np.reshape(state,[1,state_size]) #for be model's input
-
-            while block: #막힌 도로를 골랐을때(막힌 도로 = '' 로 저장해둠) do while 문 
-                if curedge in destination:
-                    break
-                if trained:
-                    qvalue, action = agent.get_trainedaction(state)
-                else:
-                    action = agent.get_action(state) #현재 edge에서 가능한 action 선택 
-
-                nextedge = env.get_nextedge(curedge, action) #next edge 계산해서 env에 보냄.
-                if nextedge!="" : break
-
-            print('%s -> ' %nextedge, end=' ')
-            routes.append(nextedge)
+        for vehi in range(len(destination)):
+            print("Episode {} : Veh{} started.".format(episode, vehi))
+            #Random traffic 생성
+            #cmd_genDemand = "python \"C:/Program Files (x86)/Eclipse/Sumo/tools/randomTrips.py\" -n {} -o {} -r {} -b 0 -e 3600 -p 3 --additional-file {} --trip-attributes \"type='type1'\" --random\"".format(net, trip, randomrou, add)
+            #os.system(cmd_genDemand)  
             
-            next_state = env.get_nextstate(veh, nextedge)  
-            next_state = np.reshape(state,[1,state_size]) #for be 모델 input
-            reward, done,before,cur = env.step(curedge, curlane, nextedge) 
-            #print('before: %s -> cur: %s'%(before, cur))
-            score += reward
-
-            if not trained: agent.append_sample(state, action, reward, next_state, done)
-
-            if not trained and len(agent.memory)>= agent.train_start:
-                agent.train_model()
+            # Reset environment 
+            veh = "veh"+str(vehi)
+            env = gj_dqnEnv(sumoBinary, net_file = net, cfg_file = sumocfg, edgelists = edgelists, alldets=alldets, dict_connection=dict_connection, veh = veh, destination = destination[vehi], state_size = state_size, action_size= action_size,lanedict = lanedict, hopadj = hopadj)
+            state = env.reset() 
+            state = np.reshape(state,[1,state_size]) #for be keras model's input
             
-            if score<-100000: #이 기능 테스트 필요 0219 6pm
-                done = True
-
-            if not trained and done: 
-                #각 에피소드마다 타깃 모델을 모델의 가중치로 업데이트
-                agent.update_target_model()
-                #sumo 종료
-                env.sumoclose()
-                #Mean Travel Time 계산
-                score_avg = 0.9*score_avg +0.1*score if score_avg!=0 else score
-                print("\n****episode : {} | score_avg : {} | memory_length : {} | epsilon : {}".format(episode, score_avg,len(agent.memory), agent.epsilon) )
+            routes = []
+            curedge = env.get_RoadID(veh) 
+            curlane = env.get_curlane(veh)
+            routes.append(curedge)
+            print('%s -> ' %curlane, end=' ') #print path
+            
+            done = False
+            timeout = False #Over 3000s, navigation ends
+            cntout = False #repeatedly visit same lane over 3 times 
+            cnt=0
+            while (not done) and (not timeout) and (not cntout):     
+                block = True
+            
+                state = env.get_state(veh, curedge, curlane) 
                 
-                #Plot Result Mean Travel Time
-                scores.append(-score_avg) #Mean Travel Time
-                episodes.append(episode)
-                if plotResult: plot_result(num_seed, episodes, scores, dirResult, num_episode)   
-                break
-            
-            if trained and done: #trained 의미 : 이미 Trained된 모델 사용할 때-> append_sample, train_model, update_target_model 필요없음 
-                env.sumoclose()
-                score_avg = 0.9*score_avg +0.1*score if score_avg!=0 else score
-                print("\n****Trained episode : {} | score_avg : {} ".format(episode, score_avg) )
-                scores.append(-score)
-                episodes.append(episode)
-                if plotResult: plot_trainedresult(num_seed, episodes, scores, dirResult, num_episode)
+                state = np.reshape(state,[1,state_size]) #for be model's input
+                cnt = 0
+                
+                while block: #막힌 도로를 골랐을때(막힌 도로 = '' 로 저장해둠) do while 
+                    if curlane in destination[vehi]:
+                        break
+                    if trained:
+                        qvalue, action = agent.get_trainedaction(state)
+                    else:
+                        if destination[vehi][0] in (dict_connection[curlane]): #next lane에 destination있으면 바로 선택하기!!
+                            action = dict_connection[curlane].index(destination[vehi][0])
+                        else:
+                            action,epsilon = agent.get_action(curlane, state) #현재 edge에서 가능한 action 선택 
 
-            curedge = nextedge
-            cnt+=1
+                    nextlane = env.get_nextlane(curlane, action) #next edge 계산해서 env에 보냄.
+                    
+                    if nextlane!="" : 
+                        nextedge = nextlane[:-2]
+                        break
 
+                routes.append(nextedge)
+                
+                print('%s -> ' %nextlane, end=' ')
+                next_state = env.get_nextstate(veh, nextedge)  
+                next_state = np.reshape(state,[1,state_size]) #for be 모델 input
+                reward, done, nextlane, timeout,cntout,blockFrom, blockTo = env.step(curedge, curlane, nextedge,nextlane, epsilon) #Step Environment
+                ##-----------------------error unknown veh----------------
+                #if reward == -1000000:
+                #    print('\nUnknonw error: ',nextlane)
+                #    sys.exit()
+                ##-----------------------error unknown veh----------------
+
+                if nextlane =="":
+                    print('[ERR] Next Lane null')
+                    timeout = True
         
-    end = time.time()
-    print('Source Code Time: ',end-start)
+                episode_score += reward
+                
+                if not trained: 
+                    num_sample+=1
+                    agent.append_sample(state, action, reward, next_state, done)
+                
+                if not trained and (len(agent.memory)> agent.train_start*(1-agent.train_success_rate)+1) and (len(agent.success_memory)>agent.train_start*agent.train_success_rate+1): agent.train_model() #모델학습
 
-    #DQN Weights 저장
-    agent.save_weights()
+                if (not trained and done) or (not trained and timeout) or (not trained and cntout): #Done by success or Timeout or Cntout
+                    if not trained and (len(agent.memory)> agent.train_start*(1-agent.train_success_rate)+1) and (len(agent.success_memory)>agent.train_start*agent.train_success_rate+1):
+                                    if episode%3==0: agent.update_target_model() #5번의 에피소드마다 타깃 모델을 모델의 가중치로 업데이트
+                    if done:
+                        print('Last lane:',nextlane)
+                        success_num+=1
+                        print('veh0 Arrived Successfully ^____^')
+                        print('Added success_sample : ',num_sample)
+                        success_sample = [agent.memory.pop() for _ in range(num_sample)]
+                        agent.success_memory.extend(success_sample)
+
+                    if timeout:
+                        print('\n* Finished by Time Out !!!')
+
+                    if cntout: #blockFrom->blockTo(3번이상 방문) 막아버리기
+                        for idx, lane in enumerate(dict_connection[blockFrom]):
+                            if blockTo in lane:
+                                dict_connection[blockFrom][idx] = ""
+                                #print('After change: ', dict_connection[blockFrom])
+                        print('\n* Finished by Count Out !!!')
+
+                    
+                    #sumo 종료
+                    env.sumoclose()
+                    break
+                
+                if trained and done: #trained 의미 : 이미 Trained된 모델 사용할 때-> append_sample, train_model, update_target_model 필요없음 
+                    env.sumoclose()
+                    score_avg = 0.9*score_avg +0.1*episode_score if score_avg!=0 else episode_score
+                    print("\n****Trained episode : {} | score_avg : {} ".format(episode, score_avg) )
+                    scores.append(-episode_score)
+                    episodes.append(episode)
+                    if plotResult: plot_trainedresult(num_seed, episodes, scores, dirResult, num_episode)
+
+                curedge = nextedge
+                curlane = nextlane
+                cnt+=1
+        
+        #Mean Travel Time 계산
+        score_avg = 0.9*score_avg +0.1*episode_score if score_avg!=0 else episode_score
+        print("\n* Episode : {} | episode_score: {}| score_avg : {} | length of memory : {} vs success_memory : {}| epsilon : {}".format(episode,episode_score, score_avg,len(agent.memory),len(agent.success_memory),agent.epsilon))
+        
+        #Plot Result Mean Travel Time
+        scores.append(-score_avg) #Mean Travel Time
+        episodes.append(episode)
+        if plotResult: plot_result(num_seed, episodes, scores, dirResult, num_episode)   
+
+        #epsilon decay
+        agent.decaying_epsilon()
+        end = time.time()
+        print("Succes # : {} out of Try #{}".format(success_num,episode*len(destination)))
+        print('Source Code Time: ',end-start)
+
+        #DQN Weights 저장
+        agent.save_weights()
     
     sys.stdout.flush()
    
-
-
+  
 if __name__ == "__main__":
-    net = "./Geojedo/Net/geojedo.net.xml"
+    net = "./Geojedo/Net/geojedo_simple.net.xml" #network.net.xml
     
-    add = "./Geojedo/Add/gj_dqn.add.xml"
-    trip = "./Geojedo/Rou/gj_dqn.trip.xml"
+    add = "./Geojedo/Add/gj_dqn.add.xml" #Traffic Flow type : normal_car & truck
+    trip = "./Geojedo/Rou/gj_dqn.trip.xml" #Random Traffic flow generation
     randomrou = "./Geojedo/Rou/gj_dqnrandom.rou.xml"
+    det = "./Geojedo/Add/gj_dqn.det.xml" #detection per lane
+
+    sumocfg = "./Geojedo/gj_dqn.sumocfg" #sumocfg -> gj_agent.rou.xml(initial point)포함 
     
-    det = "./Geojedo/Add/gj_dqn.det.xml"
-    sumocfg = "./Geojedo/gj_dqn.sumocfg"
-    
-    dirResult = './Geojedo/Result/dqn'
+    dirResult = './Geojedo/Result/dqn' #Result
     dirModel = './Geojedo/Model/dqn'
+
     fcdoutput = './Geojedo/Output/dqn.fcdoutput.xml'
 
-    veh = "veh0"
+    veh = "veh"
     
-    destination = ["-240392105#0","-243399011#1"]
-    successend = ["-240392105#0","-243399011#1"]
-    state_size = 16
-    action_size = 5
-
+    destination0 = ["-240392105#0_0"] #yellow
+    destination1 = ["-243463807#3_0"] #red
+    destination2 = ["-458050462#1_0"] #blue
+    destination3 = ["320980930#3_0"] #green
+    destination4 = ["320980919#0_0"] #purple
+    destination = [destination0,destination1,destination2,destination3,destination4 ]
+    state_size = 4
+    action_size = 4
 
     options = get_options()
     if options.nogui: sumoBinary = checkBinary('sumo')
@@ -322,12 +374,15 @@ if __name__ == "__main__":
     else: num_episode = 300
   
     edgelists = get_alledges(net) # 395edges for "./Geojedo/Net/geojedo.net.xml" 
-    
-    dict_connection = calculate_connections(net, action_size) # dict_fromto + fill empty route as ''   
+                                  # 227edges for "./Geojedo/Net/geojedo_simple.net.xml"
+    dict_connection = calculate_connections(net, action_size) # calculate lane connection : dict_fromto + fill empty route as ''   
+                                                               # action_size = 4 for "./Geojedo/Net/geojedo_simple.net.xml"
+                                                               # action_size = 5 for "./Geojedo/Net/geojedo.net.xml" 
     dict_fromto = calculate_fromto(net) #only real connenciton information without fill empty as ''
-       
+    #print('Possible next lane from initial lane: ',dict_fromto["-320980921#2_0"])
     keys=sorted(dict_fromto.keys())
-    len_lanes = len(keys) #429
+    len_lanes = len(keys) 
+    print("Num of lanes: ", len_lanes)
     lanedict = defaultdict(int) #eg. 0 -239842076#0_0
     lanedict.update((i,v) for i,v in enumerate(keys))
     
@@ -341,26 +396,19 @@ if __name__ == "__main__":
     
     make_hopadj(adj) #already saved as gj_hopadj.pkl
     '''
-
-    with open('./Geojedo/gj_adj.pkl', 'rb') as f:
-       adj = pickle.load(f) # 2d (395, 395)
-    
-    with open('./Geojedo/gj_hopadj.pkl', 'rb') as f:
-       hopadj = pickle.load(f)
-    hopadj = np.asarray(hopadj)
-
+    hopadj, adj = get_adjdata()
     dets = generate_lanedetectionfile(net,det) #already made
     alldets = get_alldets(net)
-    #print(dict_connection["478427205#2_0"])
-    
+
     """1) Run Simulation"""
     trained = False
     num_seed = random.randrange(1000)
     while True: #num_episode같아도 num_seed를 달리해서 겹치는 파일 생성 방지함. 
         file = dirModel + str(num_episode)+'_'+str(num_seed)+'.h5'
         if not os.path.isfile(file): break
-    dqn_run(num_seed, trained, sumoBinary, plotResult, num_episode, net, trip, randomrou, add, dirResult,dirModel,
-    sumocfg, fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size, lanedict, hopadj)
+    print('Num of edges: ',len(edgelists))
+    
+    dqn_run(num_seed, trained, sumoBinary, plotResult, num_episode, net, trip, randomrou, add, dirResult,dirModel,sumocfg, fcdoutput, edgelists,alldets, dict_connection,veh,destination, state_size, action_size, lanedict, hopadj)
     
     '''
     """2) Run with pre-trained model : Load Weights & Route """

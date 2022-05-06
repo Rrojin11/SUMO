@@ -7,8 +7,8 @@ from tensorflow.python.keras.initializers import RandomUniform
 class DQN(tf.keras.Model):
     def __init__(self, action_size):
         super(DQN, self).__init__()
-        self.fc1 = Dense(150, activation= 'relu')
-        self.fc2 = Dense(100, activation= 'relu')
+        self.fc1 = Dense(24, activation= 'relu')
+        self.fc2 = Dense(32, activation= 'relu')
         self.fc_out = Dense(action_size, kernel_initializer=RandomUniform(-1e-3,1e-3))
     
     def call(self, x):
